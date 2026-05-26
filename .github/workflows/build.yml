@@ -1,9 +1,85 @@
-# Шаг 9: Адаптация ROM-дерева под Recovery и настройка Retrofit + FastbootD
+name: Build OrangeFox Tucana Retrofit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Workspaces
+        uses: actions/checkout@v4
+
+      # Шаг 1: Очистка диска раннера
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      # Шаг 2: Нативная установка Python 2.7 через apt
+      - name: Setup Legacy Python 2.7
+        run: |
+          sudo apt update
+          sudo apt install -y python2
+          sudo ln -sf /usr/bin/python2 /usr/bin/python
+          python --version
+
+      # Шаг 3: Установка основных зависимостей сборки
+      - name: Install Build Dependencies
+        run: |
+          sudo apt install -y git-core gnupg flex bison gperf build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc unzip bc ccache
+
+      # Шаг 4: Установка утилиты Google Repo
+      - name: Install Repo Tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+
+      # Шаг 5: Синхронизация исходников OrangeFox (Ветка 12.1)
+      - name: Sync OrangeFox Sources
+        run: |
+          mkdir ~/OrangeFox_sync
+          cd ~/OrangeFox_sync
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch 12.1 --path ~/fox_12.1
+
+      # Шаг 6: Клонирование дерева устройства tucana
+      - name: Clone Device Tree
+        run: |
+          cd ~/fox_12.1
+          git clone https://github.com/SanyaPilot/android_device_xiaomi_tucana.git device/xiaomi/tucana
+
+      # Шаг 7: Клонирование общей ветки sm6150-common (Ветка: lineage-20-unoff)
+      - name: Clone SM6150 Common Tree
+        run: |
+          cd ~/fox_12.1
+          git clone -b lineage-20-unoff https://github.com/SanyaPilot/android_device_xiaomi_sm6150-common.git device/xiaomi/sm6150-common
+
+      # Шаг 8: Создание заглушек для vendor-папок, чтобы компилятор не падал
+      - name: Create Vendor Mocks
+        run: |
+          cd ~/fox_12.1
+          mkdir -p vendor/xiaomi/sm6150-common
+          mkdir -p vendor/xiaomi/tucana
+          touch vendor/xiaomi/sm6150-common/BoardConfigVendor.mk
+          touch vendor/xiaomi/tucana/BoardConfigVendor.mk
+
+      # Шаг 9: Адаптация ROM-дерева под Recovery и настройка Retrofit + FastbootD
       - name: Configure Device Tree and Patch ROM Dependencies
         run: |
           cd ~/fox_12.1/device/xiaomi/tucana
           
-          # 1. Создаем чистый twrp_tucana.mk (используем 'EOF' в кавычках, чтобы сохранить $)
+          # 1. Создаем чистый twrp_tucana.mk с защитой от раскрытия переменных башем
           cat << 'EOF' > twrp_tucana.mk
           $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
           $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
@@ -19,7 +95,7 @@
           PRODUCT_PACKAGES += fastbootd
           EOF
 
-          # 1.5 Перезаписываем AndroidProducts.mk
+          # 1.5 Перезаписываем AndroidProducts.mk для детекта в lunch
           cat << 'EOF' > AndroidProducts.mk
           PRODUCT_MAKEFILES := $(LOCAL_DIR)/twrp_tucana.mk
           COMMON_LUNCH_CHOICES := twrp_tucana-eng
@@ -40,3 +116,25 @@
           cd ~/fox_12.1/device/xiaomi/sm6150-common
           sed -i 's|include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|# include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|g' BoardConfigCommon.mk
           sed -i '/vendor\/lineage/d' BoardConfigCommon.mk
+
+      # Шаг 10: Компиляция рекавери
+      - name: Run Compilation
+        run: |
+          cd ~/fox_12.1
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export FOX_BUILD_DEVICE=tucana
+          export LC_ALL="C"
+          
+          # Использование предсобранного ядра + патч AVB для Xiaomi A-only
+          export OF_FORCE_PREBUILT_KERNEL=1
+          export OF_PATCH_AVB20=1
+          
+          # Сборка
+          /bin/bash -c "source build/envsetup.sh && lunch twrp_tucana-eng && mka adbd recoveryimage"
+
+      # Шаг 11: Сохранение готового файла
+      - name: Upload Output Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeFox-Tucana-Retrofit
+          path: ~/fox_12.1/out/target/product/tucana/OrangeFox-unofficial-tucana.img
