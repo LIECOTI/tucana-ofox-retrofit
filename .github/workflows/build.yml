@@ -1,4 +1,4 @@
-name: Сборка OrangeFox R12.1 (Python 2)
+name: Build OrangeFox Tucana Retrofit
 
 on:
   workflow_dispatch:
@@ -6,145 +6,115 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
 
     steps:
-    - name: Очистка места на сервере и подготовка системы
-      uses: jlumbroso/free-disk-space@v1.3.1
-      with:
-        tool-cache: true
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap: true
+      - name: Checkout Workspaces
+        uses: actions/checkout@v4
 
-    - name: Установка пакетов для сборки (включая Python 2)
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python2
-        sudo ln -sf /usr/bin/python2 /usr/bin/python
+      # Очистка диска раннера
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
-    - name: Настройка Git и утилиты Repo
-      run: |
-        git config --global user.email "actions@github.com"
-        git config --global user.name "GitHub Actions"
-        mkdir -p ~/.bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-        chmod a+x ~/.bin/repo
-        sudo ln -sf ~/.bin/repo /usr/bin/repo
+      # Установка Python 2.7 для старых скриптов компиляции
+      - name: Setup Python 2.7
+        uses: actions/setup-python@v4
+        with:
+          python-version: '2.7'
 
-    - name: Скачивание исходников OrangeFox 12.1
-      run: |
-        mkdir -p ~/OrangeFox_sync
-        cd ~/OrangeFox_sync
-        git clone https://gitlab.com/OrangeFox/sync.git
-        cd sync
-        ./orangefox_sync.sh --branch 12.1 --path ~/fox_12.1
+      # Установка зависимостей сборки
+      - name: Install Build Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git-core gnupg flex bison gperf build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc unzip bc ccache
 
-    - name: Скачивание общего дерева, дерева tucana и ядра LineageOS
-      run: |
-        cd ~/fox_12.1
-        git clone https://github.com/LineageOS/android_device_xiaomi_sm6150-common -b lineage-19.1 device/xiaomi/sm6150-common
-        git clone https://github.com/LineageOS/android_device_xiaomi_tucana -b lineage-19.1 device/xiaomi/tucana
-        git clone https://github.com/LineageOS/android_kernel_xiaomi_sm6150 -b lineage-19.1 kernel/xiaomi/sm6150
+      # Установка утилиты Google Repo
+      - name: Install Repo Tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
 
-    - name: Создание конфигурации ретрофита для tucana
-      run: |
-        cat << 'EOF' > ~/fox_12.1/device/xiaomi/tucana/BoardConfig.mk
-        DEVICE_PATH := device/xiaomi/tucana
-        include device/xiaomi/sm6150-common/BoardConfigCommon.mk
-        TARGET_ARCH := arm64
-        TARGET_ARCH_VARIANT := armv8-a
-        TARGET_CPU_ABI := arm64-v8a
-        TARGET_CPU_VARIANT := generic
-        TARGET_2ND_ARCH := arm
-        TARGET_2ND_ARCH_VARIANT := armv8-a
-        TARGET_2ND_CPU_ABI := armeabi-v7a
-        TARGET_2ND_CPU_VARIANT := generic
-        TARGET_BOARD_PLATFORM := sm7150
-        TARGET_BOOTLOADER_BOARD_NAME := sm7150
-        TARGET_KERNEL_CONFIG := vendor/tucana.config
-        BOARD_FLASH_BLOCK_SIZE := 262144
-        BOARD_BOOTIMAGE_PARTITION_SIZE := 134217728
-        BOARD_RECOVERYIMAGE_PARTITION_SIZE := 134217728
-        BOARD_CACHEIMAGE_PARTITION_SIZE := 402653184
-        BOARD_DTBOIMG_PARTITION_SIZE := 33554432
-        BOARD_DYNAMIC_PARTITIONS := true
-        PRODUCT_RETROFIT_DYNAMIC_PARTITIONS := true
-        BOARD_SUPER_PARTITION_BLOCK_DEVICES := system vendor cust
-        BOARD_SUPER_PARTITION_METADATA_DEVICE := system
-        BOARD_SUPER_PARTITION_SYSTEM_DEVICE_SIZE := 4831838208
-        BOARD_SUPER_PARTITION_VENDOR_DEVICE_SIZE := 2147483648
-        BOARD_SUPER_PARTITION_CUST_DEVICE_SIZE := 1073741824
-        BOARD_SUPER_PARTITION_SIZE := 8053063680
-        BOARD_QTI_DYNAMIC_PARTITIONS_SIZE := 8048869376
-        BOARD_QTI_DYNAMIC_PARTITIONS_PARTITION_LIST := system vendor product system_ext odm
-        BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
-        BOARD_PRODUCTIMAGE_FILE_SYSTEM_TYPE := ext4
-        BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE := ext4
-        BOARD_ODMIMAGE_FILE_SYSTEM_TYPE := ext4
-        TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/recovery.fstab
-        TW_THEME := portrait_hdpi
-        TARGET_RECOVERY_PIXEL_FORMAT := "RGBX_8888"
-        TW_BRIGHTNESS_PATH := "/sys/class/backlight/panel0-backlight/brightness"
-        TW_MAX_BRIGHTNESS := 2047
-        TW_DEFAULT_BRIGHTNESS := 800
-        TW_Y_OFFSET := 85
-        TW_INCLUDE_CRYPTO := true
-        TW_INCLUDE_FASTBOOTD := true
-        TW_INCLUDE_REPACKTOOLS := true
-        TW_HAS_MTP := true
-        EOF
+      # Синхронизация исходников OrangeFox (Ветка 12.1)
+      - name: Sync OrangeFox Sources
+        run: |
+          mkdir ~/OrangeFox_sync
+          cd ~/OrangeFox_sync
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch 12.1 --path ~/fox_12.1
 
-        cat << 'EOF' > ~/fox_12.1/device/xiaomi/tucana/recovery.fstab
-        system                                          /system      ext4    ro,barrier=1,discard     wait,logical
-        vendor                                          /vendor      ext4    ro,barrier=1,discard     wait,logical
-        product                                         /product     ext4    ro,barrier=1,discard     wait,logical
-        system_ext                                      /system_ext  ext4    ro,barrier=1,discard     wait,logical
-        odm                                             /odm         ext4    ro,barrier=1,discard     wait,logical
-        /dev/block/bootdevice/by-name/boot              /boot        emmc    defaults                 defaults
-        /dev/block/bootdevice/by-name/recovery          /recovery    emmc    defaults                 defaults
-        /dev/block/bootdevice/by-name/cache             /cache       ext4    nosuid,nodev,noatime     wait,formattable,check
-        /dev/block/bootdevice/by-name/metadata          /metadata    ext4    nosuid,nodev,noatime     wait,formattable
-        /dev/block/bootdevice/by-name/misc              /misc        emmc    defaults                 defaults
-        /dev/block/bootdevice/by-name/dtbo              /dtbo        emmc    defaults                 defaults
-        /dev/block/bootdevice/by-name/system            /system_image emmc   defaults                 flags=display="System Image";backup=1;flashimg=1
-        /dev/block/bootdevice/by-name/vendor            /vendor_image emmc   defaults                 flags=display="Vendor Image";backup=1;flashimg=1
-        /dev/block/bootdevice/by-name/cust              /cust        ext4    ro                       flags=display="Cust Partition";backup=1
-        /dev/block/bootdevice/by-name/userdata          /data        f2fs    nosuid,nodev,noatime     wait,check,formattable,fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,metadata_encryption=aes-256-xts:wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption
-        /usb_otg                                        /vfat        vfat    /dev/block/sdg1 /dev/block/sdg flags=fsflags=utf8;display="USB-Storage";storage;wipeingui;removable
-        EOF
+      # Клонирование дерева устройства tucana
+      - name: Clone Device Tree
+        run: |
+          cd ~/fox_12.1
+          git clone https://github.com/SanyaPilot/android_device_xiaomi_tucana.git device/xiaomi/tucana
 
-        cat << 'EOF' > ~/fox_12.1/device/xiaomi/tucana/vendorsetup.sh
-        #!/bin/bash
-        export ALLOW_MISSING_DEPENDENCIES=true
-        export FOX_BUILD_DEVICE="tucana"
-        export LC_ALL="C"
-        export OF_SCREEN_H=2340
-        export OF_STATUS_H=90
-        export OF_STATUS_INDENT_LEFT=40
-        export OF_STATUS_INDENT_RIGHT=40
-        export OF_PATCH_AVB20=1
-        export FOX_VANILLA_BUILD=1
-        export OF_DISABLE_MIUI_SPECIFIC_FEATURES=1
-        export USE_CCACHE=1
-        EOF
+      # Клонирование ТВОЕЙ общей ветки sm6150-common (Ветка: lineage-20-unoff)
+      - name: Clone SM6150 Common Tree
+        run: |
+          cd ~/fox_12.1
+          git clone -b lineage-20-unoff https://github.com/SanyaPilot/android_device_xiaomi_sm6150-common.git device/xiaomi/sm6150-common
 
-    - name: Запуск компиляции на Python 2
-      run: |
-        cd ~/fox_12.1
-        export PYTHON=/usr/bin/python2
-        export ALLOW_MISSING_DEPENDENCIES=true
-        bash -c "source build/envsetup.sh && lunch twrp_tucana-eng && mka adbd recoveryimage"
+      # Создание заглушек для vendor-папок, чтобы компилятор не ругался на отсутствие файлов
+      - name: Create Vendor Mocks
+        run: |
+          cd ~/fox_12.1
+          mkdir -p vendor/xiaomi/sm6150-common
+          mkdir -p vendor/xiaomi/tucana
+          touch vendor/xiaomi/sm6150-common/BoardConfigVendor.mk
+          touch vendor/xiaomi/tucana/BoardConfigVendor.mk
 
-    - name: Загрузка готового рекавери
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: "OrangeFox-R12.1-${{ github.run_id }}"
-        name: "OrangeFox Unofficial для Tucana"
-        files: /root/fox_12.1/out/target/product/tucana/OrangeFox-*.img
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Конфигурация Retrofit и FastbootD
+      - name: Configure Retrofit and FastbootD
+        run: |
+          cd ~/fox_12.1/device/xiaomi/tucana
+          
+          # Прописываем параметры Retrofit Partitions в BoardConfig.mk
+          echo "" >> BoardConfig.mk
+          echo "# Retrofit Dynamic Partitions Configuration" >> BoardConfig.mk
+          echo "BOARD_SUPER_PARTITION_SYSTEM_DEVICE_SIZE := 4831838208" >> BoardConfig.mk
+          echo "BOARD_SUPER_PARTITION_VENDOR_DEVICE_SIZE := 2147483648" >> BoardConfig.mk
+          echo "BOARD_SUPER_PARTITION_CUST_DEVICE_SIZE := 1073741824" >> BoardConfig.mk
+          echo "BOARD_SUPER_PARTITION_SIZE := 8053063680" >> BoardConfig.mk
+          echo "BOARD_SUPER_PARTITION_BLOCK_DEVICES := system vendor cust" >> BoardConfig.mk
+          echo "BOARD_SUPER_PARTITION_METADATA_DEVICE := system" >> BoardConfig.mk
+          echo "BOARD_QTI_DYNAMIC_PARTITIONS_SIZE := 8048869376" >> BoardConfig.mk
+          
+          # Автоматически добавляем fastbootd в первый попавшийся .mk файл конфигурации устройства
+          TARGET_MK=$(find . -name "*.mk" ! -name "BoardConfig.mk" | head -n 1)
+          if [ -f "$TARGET_MK" ]; then
+            echo "" >> $TARGET_MK
+            echo "# Enable FastbootD" >> $TARGET_MK
+            echo "PRODUCT_PACKAGES += fastbootd" >> $TARGET_MK
+          fi
+
+      # Компиляция рекавери
+      - name: Run Compilation
+        run: |
+          cd ~/fox_12.1
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export FOX_BUILD_DEVICE=tucana
+          export LC_ALL="C"
+          
+          # Флаги из гайда: обход сборки ядра + патч AVB для Xiaomi A-only
+          export OF_FORCE_PREBUILT_KERNEL=1
+          export OF_PATCH_AVB20=1
+          
+          # Запуск сборки окружения
+          /bin/bash -c "source build/envsetup.sh && lunch twrp_tucana-eng && mka adbd recoveryimage"
+
+      # Сохранение готового файла
+      - name: Upload Output Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeFox-Tucana-Retrofit
+          path: ~/fox_12.1/out/target/product/tucana/OrangeFox-unofficial-tucana.img
