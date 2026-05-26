@@ -23,7 +23,7 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # Шаг 2: Нативная установка Python 2.7 через apt вместо сломанного setup-python
+      # Шаг 2: Нативная установка Python 2.7 через apt
       - name: Setup Legacy Python 2.7
         run: |
           sudo apt update
@@ -59,7 +59,7 @@ jobs:
           cd ~/fox_12.1
           git clone https://github.com/SanyaPilot/android_device_xiaomi_tucana.git device/xiaomi/tucana
 
-      # Шаг 7: Клонирование твоей общей ветки sm6150-common (Ветка: lineage-20-unoff)
+      # Шаг 7: Клонирование общей ветки sm6150-common (Ветка: lineage-20-unoff)
       - name: Clone SM6150 Common Tree
         run: |
           cd ~/fox_12.1
@@ -74,12 +74,27 @@ jobs:
           touch vendor/xiaomi/sm6150-common/BoardConfigVendor.mk
           touch vendor/xiaomi/tucana/BoardConfigVendor.mk
 
-      # Шаг 9: Конфигурация Retrofit и FastbootD
-      - name: Configure Retrofit and FastbootD
+      # Шаг 9: Адаптация ROM-дерева под Recovery и настройка Retrofit + FastbootD
+      - name: Configure Device Tree and Patch ROM Dependencies
         run: |
+          # 1. Создаем чистый twrp_tucana.mk для работы команды lunch в минимальном манифесте
+          cat <<EOF > ~/fox_12.1/device/xiaomi/tucana/twrp_tucana.mk
+          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)
+          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/base.mk)
+          \$(call inherit-product, vendor/twrp/config/common.mk)
+
+          PRODUCT_NAME := twrp_tucana
+          PRODUCT_DEVICE := tucana
+          PRODUCT_BRAND := Xiaomi
+          PRODUCT_MODEL := Mi Note 10
+          PRODUCT_MANUFACTURER := Xiaomi
+
+          # Включение FastbootD в рекавери раздел
+          PRODUCT_PACKAGES += fastbootd
+          EOF
+
+          # 2. Прописываем параметры Retrofit Partitions в BoardConfig.mk
           cd ~/fox_12.1/device/xiaomi/tucana
-          
-          # Прописываем параметры Retrofit Partitions в BoardConfig.mk
           echo "" >> BoardConfig.mk
           echo "# Retrofit Dynamic Partitions Configuration" >> BoardConfig.mk
           echo "BOARD_SUPER_PARTITION_SYSTEM_DEVICE_SIZE := 4831838208" >> BoardConfig.mk
@@ -89,14 +104,11 @@ jobs:
           echo "BOARD_SUPER_PARTITION_BLOCK_DEVICES := system vendor cust" >> BoardConfig.mk
           echo "BOARD_SUPER_PARTITION_METADATA_DEVICE := system" >> BoardConfig.mk
           echo "BOARD_QTI_DYNAMIC_PARTITIONS_SIZE := 8048869376" >> BoardConfig.mk
-          
-          # Автоматически добавляем fastbootd в конфигурацию продукта
-          TARGET_MK=$(find . -name "*.mk" ! -name "BoardConfig.mk" | head -n 1)
-          if [ -f "$TARGET_MK" ]; then
-            echo "" >> $TARGET_MK
-            echo "# Enable FastbootD" >> $TARGET_MK
-            echo "PRODUCT_PACKAGES += fastbootd" >> $TARGET_MK
-          fi
+
+          # 3. Вырезаем из BoardConfigCommon.mk тяжелые зависимости полноценной LineageOS
+          cd ~/fox_12.1/device/xiaomi/sm6150-common
+          sed -i 's|include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|# include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|g' BoardConfigCommon.mk
+          sed -i '/vendor\/lineage/d' BoardConfigCommon.mk
 
       # Шаг 10: Компиляция рекавери
       - name: Run Compilation
