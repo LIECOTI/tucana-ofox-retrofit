@@ -23,7 +23,7 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # Шаг 2: Установка Python 3 как дефолтного (Критично для Android 12.1+)
+      # Шаг 2: Установка Python 3 как дефолтного
       - name: Setup System Python
         run: |
           sudo apt update
@@ -52,6 +52,30 @@ jobs:
           cd sync
           ./orangefox_sync.sh --branch 12.1 --path ~/fox_12.1
 
+      # Шаг 5.5: Исправление структуры папок вендора OrangeFox (Критично!)
+      - name: Fix OrangeFox Vendor Structure
+        run: |
+          cd ~/fox_12.1
+          echo "=== Проверка исходной структуры папок в vendor ==="
+          ls -la vendor/ || true
+          
+          # Если создалась папка vendor/recovery вместо vendor/fox
+          if [ -d "vendor/recovery" ] && [ ! -d "vendor/fox" ]; then
+            echo "Переносим vendor/recovery в vendor/fox..."
+            mv vendor/recovery vendor/fox
+          fi
+          
+          # Если внутри vendor/fox создалась еще одна вложенность recovery
+          if [ -d "vendor/fox/recovery" ]; then
+            echo "Исправляем вложенность vendor/fox/recovery..."
+            mv vendor/fox/recovery/* vendor/fox/ 2>/dev/null || true
+            mv vendor/fox/recovery/.* vendor/fox/ 2>/dev/null || true
+            rmdir vendor/fox/recovery
+          fi
+          
+          echo "=== Результирующая структура папки vendor/fox ==="
+          ls -la vendor/fox/ || true
+
       # Шаг 6: Клонирование дерева устройства tucana
       - name: Clone Device Tree
         run: |
@@ -78,7 +102,7 @@ jobs:
         run: |
           cd ~/fox_12.1/device/xiaomi/tucana
           
-          # 1. Создаем чистый twrp_tucana.mk с наследованием структуры OrangeFox (vendor/fox)
+          # 1. Создаем чистый twrp_tucana.mk с наследованием структуры OrangeFox
           cat << 'EOF' > twrp_tucana.mk
           $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
           $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
@@ -128,13 +152,9 @@ jobs:
           export OF_FORCE_PREBUILT_KERNEL=1
           export OF_PATCH_AVB20=1
           
-          # Временно отключаем экстренный выход bash, чтобы зафиксировать вывод ошибок lunch
-          set +e
+          # Запуск инициализации и сборки с жестким контролем ошибок
           source build/envsetup.sh
           lunch twrp_tucana-eng
-          
-          # Возвращаем контроль ошибок для самого процесса сборки
-          set -e
           mka adbd recoveryimage
 
       # Шаг 11: Сохранение готового файла
