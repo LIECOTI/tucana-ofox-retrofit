@@ -23,12 +23,11 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # Шаг 2: Нативная установка Python 2.7 через apt
-      - name: Setup Legacy Python 2.7
+      # Шаг 2: Установка Python 3 как дефолтного (Критично для Android 12.1+)
+      - name: Setup System Python
         run: |
           sudo apt update
-          sudo apt install -y python2
-          sudo ln -sf /usr/bin/python2 /usr/bin/python
+          sudo apt install -y python3 python-is-python3 python2
           python --version
 
       # Шаг 3: Установка основных зависимостей сборки
@@ -79,11 +78,11 @@ jobs:
         run: |
           cd ~/fox_12.1/device/xiaomi/tucana
           
-          # 1. Создаем чистый twrp_tucana.mk с защитой от раскрытия переменных башем
+          # 1. Создаем чистый twrp_tucana.mk с наследованием структуры OrangeFox (vendor/fox)
           cat << 'EOF' > twrp_tucana.mk
           $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
           $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
-          $(call inherit-product, vendor/twrp/config/common.mk)
+          $(call inherit-product, vendor/fox/config/common.mk)
 
           PRODUCT_NAME := twrp_tucana
           PRODUCT_DEVICE := tucana
@@ -91,7 +90,7 @@ jobs:
           PRODUCT_MODEL := Mi Note 10
           PRODUCT_MANUFACTURER := Xiaomi
 
-          # Включение FastbootD в рекавери раздел
+          # Включение FastbootD в раздел рекавери
           PRODUCT_PACKAGES += fastbootd
           EOF
 
@@ -129,8 +128,14 @@ jobs:
           export OF_FORCE_PREBUILT_KERNEL=1
           export OF_PATCH_AVB20=1
           
-          # Сборка
-          /bin/bash -c "source build/envsetup.sh && lunch twrp_tucana-eng && mka adbd recoveryimage"
+          # Временно отключаем экстренный выход bash, чтобы зафиксировать вывод ошибок lunch
+          set +e
+          source build/envsetup.sh
+          lunch twrp_tucana-eng
+          
+          # Возвращаем контроль ошибок для самого процесса сборки
+          set -e
+          mka adbd recoveryimage
 
       # Шаг 11: Сохранение готового файла
       - name: Upload Output Image
