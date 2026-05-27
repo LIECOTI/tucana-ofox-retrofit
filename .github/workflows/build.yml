@@ -64,25 +64,51 @@ jobs:
           cd ~/fox_12.1
           git clone -b lineage-20-unoff https://github.com/SanyaPilot/android_device_xiaomi_sm6150-common.git device/xiaomi/sm6150-common
 
-      # Шаг 8: Создание заглушек для vendor-папок, чтобы компилятор не падал
-      - name: Create Vendor Mocks
+      # Шаг 8: Автоматическое исправление путей OrangeFox и создание заглушек
+      - name: Auto Fix Vendor Paths and Create Mocks
         run: |
           cd ~/fox_12.1
+          
+          echo "=== Авто-поиск конфигурации OrangeFox ==="
+          FOX_COMMON=$(find vendor/ -path "*/config/common.mk" | head -n 1)
+          echo "Файл найден по пути: $FOX_COMMON"
+          
+          # Создаем папки для подстраховки путей
+          mkdir -p vendor/fox/config
+          mkdir -p vendor/recovery/config
+          
+          # Настраиваем перекрестные ссылки, чтобы работали оба варианта структуры
+          if [[ "$FOX_COMMON" == *"vendor/recovery"* ]]; then
+            echo "Конфигурация в vendor/recovery. Линкуем в vendor/fox..."
+            ln -sf ~/fox_12.1/vendor/recovery/config/common.mk vendor/fox/config/common.mk
+          elif [[ "$FOX_COMMON" == *"vendor/fox"* ]]; then
+            echo "Конфигурация в vendor/fox. Линкуем в vendor/recovery..."
+            ln -sf ~/fox_12.1/vendor/fox/config/common.mk vendor/recovery/config/common.mk
+          else
+            echo "Предупреждение: Скрипт не нашел файл автоматически, проверяем базовую структуру..."
+            if [ -d "vendor/recovery" ]; then cp -r vendor/recovery/* vendor/fox/ 2>/dev/null || true; fi
+          fi
+          
+          # Создание заглушек для вендоров устройства, чтобы компилятор не падал
           mkdir -p vendor/xiaomi/sm6150-common
           mkdir -p vendor/xiaomi/tucana
           touch vendor/xiaomi/sm6150-common/BoardConfigVendor.mk
           touch vendor/xiaomi/tucana/BoardConfigVendor.mk
+
+          echo "=== Проверка структуры после исправления ==="
+          ls -la vendor/fox/config/ || true
+          ls -la vendor/recovery/config/ || true
 
       # Шаг 9: Адаптация ROM-дерева под Recovery и настройка Retrofit + FastbootD
       - name: Configure Device Tree and Patch ROM Dependencies
         run: |
           cd ~/fox_12.1/device/xiaomi/tucana
           
-          # 1. Создаем чистый twrp_tucana.mk с наследованием структуры OrangeFox 12.1
+          # 1. Создаем чистый twrp_tucana.mk с гарантированным путем наследования
           cat << 'EOF' > twrp_tucana.mk
           $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
           $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
-          $(call inherit-product, vendor/recovery/config/common.mk)
+          $(call inherit-product, vendor/fox/config/common.mk)
 
           PRODUCT_NAME := twrp_tucana
           PRODUCT_DEVICE := tucana
