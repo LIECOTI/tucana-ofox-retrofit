@@ -140,23 +140,34 @@ jobs:
           sed -i 's|include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|# include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|g' BoardConfigCommon.mk
           sed -i '/vendor\/lineage/d' BoardConfigCommon.mk
 
-      # Шаг 10: Компиляция рекавери
-      - name: Run Compilation
+      # Шаг 10.1: Инициализация окружения сборки
+      - name: Build Environment Setup
         run: |
           cd ~/fox_12.1
+          source build/envsetup.sh
+
+      # Шаг 10.2: Выбор устройства (Lunch)
+      - name: Run Lunch Command
+        run: |
+          cd ~/fox_12.1
+          source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_BUILD_DEVICE=tucana
           export LC_ALL="C"
-          
-          # Использование предсобранного ядра + патч AVB для Xiaomi A-only
+          lunch twrp_tucana-eng
+
+      # Шаг 10.3: Запуск самой компиляции
+      - name: Run mka Build
+        run: |
+          cd ~/fox_12.1
+          source build/envsetup.sh
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export FOX_BUILD_DEVICE=tucana
+          export LC_ALL="C"
           export OF_FORCE_PREBUILT_KERNEL=1
           export OF_PATCH_AVB20=1
-          
-          # Запуск инициализации и сборки с жестким контролем ошибок
-          source build/envsetup.sh
-          lunch twrp_tucana-eng
           mka adbd recoveryimage
-
+          
       # Шаг 11: Сохранение готового файла
       - name: Upload Output Image
         uses: actions/upload-artifact@v4
