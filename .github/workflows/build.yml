@@ -8,10 +8,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Workspaces
+      - name: Checkout Workspace
         uses: actions/checkout@v4
 
-      # Шаг 1: Очистка диска раннера
+      # Шаг 1: Максимальная очистка диска раннера (Освобождаем ~35 ГБ)
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -23,7 +23,7 @@ jobs:
           docker-images: true
           swap-storage: true
 
-      # Шаг 2: Установка Python 3 как дефолтного
+      # Шаг 2: Установка Python и окружения
       - name: Setup System Python
         run: |
           sudo apt update
@@ -52,97 +52,18 @@ jobs:
           cd sync
           ./orangefox_sync.sh --branch 12.1 --path ~/fox_12.1
 
-      # Шаг 6: Клонирование дерева устройства tucana
-      - name: Clone Device Tree
+      # Шаг 6: Перенос ТВОЕГО чистого дерева устройств в папку сборки
+      # Мы берем файлы, которые ты загрузил в свой репозиторий, и копируем их куда нужно
+      - name: Setup Clean Device Tree
         run: |
-          cd ~/fox_12.1
-          git clone https://github.com/SanyaPilot/android_device_xiaomi_tucana.git device/xiaomi/tucana
-
-      # Шаг 7: Клонирование общей ветки sm6150-common (Ветка: lineage-20-unoff)
-      - name: Clone SM6150 Common Tree
-        run: |
-          cd ~/fox_12.1
-          git clone -b lineage-20-unoff https://github.com/SanyaPilot/android_device_xiaomi_sm6150-common.git device/xiaomi/sm6150-common
-
-      # Шаг 8: Автоматическое исправление путей OrangeFox и создание заглушек
-      - name: Auto Fix Vendor Paths and Create Mocks
-        run: |
-          cd ~/fox_12.1
+          mkdir -p ~/fox_12.1/device/xiaomi/tucana
+          cp -r * ~/fox_12.1/device/xiaomi/tucana/
           
-          echo "=== Авто-поиск конфигурации OrangeFox ==="
-          FOX_COMMON=$(find vendor/ -path "*/config/common.mk" | head -n 1)
-          echo "Файл найден по пути: $FOX_COMMON"
-          
-          # Создаем папки для подстраховки путей
-          mkdir -p vendor/fox/config
-          mkdir -p vendor/recovery/config
-          
-          # Настраиваем перекрестные ссылки, чтобы работали оба варианта структуры
-          if [[ "$FOX_COMMON" == *"vendor/recovery"* ]]; then
-            echo "Конфигурация в vendor/recovery. Линкуем в vendor/fox..."
-            ln -sf ~/fox_12.1/vendor/recovery/config/common.mk vendor/fox/config/common.mk
-          elif [[ "$FOX_COMMON" == *"vendor/fox"* ]]; then
-            echo "Конфигурация в vendor/fox. Линкуем в vendor/recovery..."
-            ln -sf ~/fox_12.1/vendor/fox/config/common.mk vendor/recovery/config/common.mk
-          else
-            echo "Предупреждение: Скрипт не нашел файл автоматически, проверяем базовую структуру..."
-            if [ -d "vendor/recovery" ]; then cp -r vendor/recovery/* vendor/fox/ 2>/dev/null || true; fi
-          fi
-          
-          # Создание заглушек для вендоров устройства, чтобы компилятор не падал
-          mkdir -p vendor/xiaomi/sm6150-common
-          mkdir -p vendor/xiaomi/tucana
-          touch vendor/xiaomi/sm6150-common/BoardConfigVendor.mk
-          touch vendor/xiaomi/tucana/BoardConfigVendor.mk
+          # Создаем техническую заглушку, чтобы OrangeFox не ругался на пути общего конфига
+          mkdir -p ~/fox_12.1/vendor/fox/config
+          touch ~/fox_12.1/vendor/fox/config/common.mk
 
-          echo "=== Проверка структуры после исправления ==="
-          ls -la vendor/fox/config/ || true
-          ls -la vendor/recovery/config/ || true
-
-      # Шаг 9: Адаптация ROM-дерева под Recovery и настройка Retrofit + FastbootD
-      - name: Configure Device Tree and Patch ROM Dependencies
-        run: |
-          cd ~/fox_12.1/device/xiaomi/tucana
-          
-          # 1. Создаем чистый twrp_tucana.mk с гарантированным путем наследования
-          cat << 'EOF' > twrp_tucana.mk
-          $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
-          $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
-          $(call inherit-product, vendor/fox/config/common.mk)
-
-          PRODUCT_NAME := twrp_tucana
-          PRODUCT_DEVICE := tucana
-          PRODUCT_BRAND := Xiaomi
-          PRODUCT_MODEL := Mi Note 10
-          PRODUCT_MANUFACTURER := Xiaomi
-
-          # Включение FastbootD в раздел рекавери
-          PRODUCT_PACKAGES += fastbootd
-          EOF
-
-          # 1.5 Перезаписываем AndroidProducts.mk для детекта в lunch
-          cat << 'EOF' > AndroidProducts.mk
-          PRODUCT_MAKEFILES := $(LOCAL_DIR)/twrp_tucana.mk
-          COMMON_LUNCH_CHOICES := twrp_tucana-eng
-          EOF
-
-          # 2. Прописываем параметры Retrofit Partitions в BoardConfig.mk
-          echo "" >> BoardConfig.mk
-          echo "# Retrofit Dynamic Partitions Configuration" >> BoardConfig.mk
-          echo "BOARD_SUPER_PARTITION_SYSTEM_DEVICE_SIZE := 4831838208" >> BoardConfig.mk
-          echo "BOARD_SUPER_PARTITION_VENDOR_DEVICE_SIZE := 2147483648" >> BoardConfig.mk
-          echo "BOARD_SUPER_PARTITION_CUST_DEVICE_SIZE := 1073741824" >> BoardConfig.mk
-          echo "BOARD_SUPER_PARTITION_SIZE := 8053063680" >> BoardConfig.mk
-          echo "BOARD_SUPER_PARTITION_BLOCK_DEVICES := system vendor cust" >> BoardConfig.mk
-          echo "BOARD_SUPER_PARTITION_METADATA_DEVICE := system" >> BoardConfig.mk
-          echo "BOARD_QTI_DYNAMIC_PARTITIONS_SIZE := 8048869376" >> BoardConfig.mk
-
-          # 3. Вырезаем из BoardConfigCommon.mk тяжелые зависимости полноценной LineageOS
-          cd ~/fox_12.1/device/xiaomi/sm6150-common
-          sed -i 's|include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|# include device/qcom/sepolicy_vndr-legacy-um/SEPolicy.mk|g' BoardConfigCommon.mk
-          sed -i '/vendor\/lineage/d' BoardConfigCommon.mk
-
-      # Шаг 10: Компиляция рекавери
+      # Шаг 7: Компиляция рекавери
       - name: Run Compilation
         run: |
           cd ~/fox_12.1
@@ -150,22 +71,20 @@ jobs:
           export FOX_BUILD_DEVICE=tucana
           export LC_ALL="C"
           
-          # Использование предсобранного ядра + патч AVB для Xiaomi A-only
+          # Флаги принудительного использования нашего ядра и патча AVB2.0
           export OF_FORCE_PREBUILT_KERNEL=1
           export OF_PATCH_AVB20=1
           
-          echo "=== Степень 1: Запуск envsetup ==="
-          set +e
+          echo "=== Запуск envsetup ==="
           source build/envsetup.sh
-          set -e
           
-          echo "=== Степень 2: Запуск команды lunch ==="
+          echo "=== Выбор устройства (lunch) ==="
           lunch twrp_tucana-eng
           
-          echo "=== Степень 3: Запуск сборки mka ==="
+          echo "=== Старт сборки ==="
           mka adbd recoveryimage
 
-      # Шаг 11: Сохранение готового файла
+      # Шаг 8: Сохранение готового файла (.img рекавери появится в релизах воркфлоу)
       - name: Upload Output Image
         uses: actions/upload-artifact@v4
         with:
